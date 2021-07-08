@@ -30,8 +30,6 @@ exports.action = functions.https.onRequest(async (request, response) => {
       return response.send({});
     }
 
-    console.log(request.body);
-
     try {
       if (type === JOIN) {
         await joinTable(admin.firestore(), request.body);
@@ -120,7 +118,55 @@ exports.lnurlpay = functions.https.onRequest(async (request, response) => {
         });
       }
     } catch (e) {
-      return response.status(500).send({ error: e.message });
+      return response.status(200).send({ status: "ERROR", reason: e.message });
+    }
+  });
+});
+
+exports.lnurlwithdraw = functions.https.onRequest(async (request, response) => {
+  cors(request, response, async () => {
+    let { profileId, pr = null } = request.query;
+
+    try {
+      // get profile balance
+      const profileSnap = await admin
+        .firestore()
+        .collection("profiles")
+        .doc(profileId)
+        .get();
+
+      console.log(profileSnap, profileSnap.data())
+
+      const { balance = 0, withdrawLock = false } = profileSnap.data();
+
+      if (balance < 1 || withdrawLock) {
+        throw new Error("No balance to withdraw!");
+      }
+
+      if (pr) {
+        // an invoice was sent, process the withdraw
+        let ref = await admin
+          .firestore()
+          .collection("payments")
+          .add({
+            payment_request: pr,
+            profileId,
+            state: REQUESTED_PAYMENT
+          });
+      } else {
+        // just return the withdraw params
+        return response.send({
+          callback: `https://${request.get(
+            "host"
+          )}/lnurlwithdraw?profileId=${profileId}`,
+          maxWithdrawable: balance * 1000,
+          minWithdrawable: 1000,
+          k1: "",
+          tag: "withdrawRequest",
+        });
+      }
+    } catch (e) {
+      return response.status(200).send({ status: "ERROR", reason: e.message });
     }
   });
 });
